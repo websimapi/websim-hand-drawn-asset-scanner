@@ -1,4 +1,4 @@
-const { useState, useEffect, useRef } = React;
+const { useState, useEffect } = React;
 
 function AssetScanner() {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -12,7 +12,6 @@ function AssetScanner() {
   });
   const [assets, setAssets] = useState([]);
   const [opencvReady, setOpencvReady] = useState(window.opencvReady || false);
-  const canvasRef = useRef(null);
   const room = new WebsimSocket();
 
   useEffect(() => {
@@ -46,7 +45,7 @@ function AssetScanner() {
       reader.onload = (e) => {
         setPreviewUrl(e.target.result);
         setProcessedUrl(null); // Reset processed image when new file selected
-      }
+      };
       reader.readAsDataURL(file);
       setStep('process');
     }
@@ -58,12 +57,12 @@ function AssetScanner() {
       return;
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
-        const canvas = canvasRef.current;
+        // Create an offscreen canvas for processing
+        const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');
-        
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
@@ -73,34 +72,55 @@ function AssetScanner() {
 
         if (processingOptions.removeGridLines || processingOptions.removeRuledLines) {
           cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-          cv.adaptiveThreshold(dst, dst, 255,
+          cv.adaptiveThreshold(
+            dst,
+            dst,
+            255,
             cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv.THRESH_BINARY, 11, 2);
+            cv.THRESH_BINARY,
+            11,
+            2
+          );
 
           let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
           cv.morphologyEx(dst, dst, cv.MORPH_OPEN, kernel);
           kernel.delete();
+        } else {
+          dst = src.clone();
         }
 
         if (processingOptions.enhanceContrast) {
-          cv.equalizeHist(dst, dst);
+          if (dst.channels() === 1) {
+            cv.equalizeHist(dst, dst);
+          } else {
+            cv.cvtColor(dst, dst, cv.COLOR_RGBA2GRAY);
+            cv.equalizeHist(dst, dst);
+          }
         }
 
         cv.imshow(canvas, dst);
-        
         src.delete();
         dst.delete();
 
-        setProcessedUrl(canvas.toDataURL());
-        canvas.toBlob(resolve);
+        const dataUrl = canvas.toDataURL();
+        setProcessedUrl(dataUrl);
+        resolve();
+      };
+      img.onerror = (err) => {
+        reject(err);
       };
       img.src = previewUrl;
     });
   };
 
   const handleProcess = async () => {
-    await processImage();
-    setStep('review');
+    try {
+      await processImage();
+      setStep('review');
+    } catch (error) {
+      console.error('Image processing failed:', error);
+      alert('Failed to process image. Please try again.');
+    }
   };
 
   const handleUpload = async () => {
@@ -167,10 +187,12 @@ function AssetScanner() {
                 <input
                   type="checkbox"
                   checked={processingOptions.removeGridLines}
-                  onChange={(e) => setProcessingOptions(prev => ({
-                    ...prev,
-                    removeGridLines: e.target.checked
-                  }))}
+                  onChange={(e) =>
+                    setProcessingOptions((prev) => ({
+                      ...prev,
+                      removeGridLines: e.target.checked
+                    }))
+                  }
                 />
                 Remove Grid Lines
               </label>
@@ -181,10 +203,12 @@ function AssetScanner() {
                 <input
                   type="checkbox"
                   checked={processingOptions.removeRuledLines}
-                  onChange={(e) => setProcessingOptions(prev => ({
-                    ...prev,
-                    removeRuledLines: e.target.checked
-                  }))}
+                  onChange={(e) =>
+                    setProcessingOptions((prev) => ({
+                      ...prev,
+                      removeRuledLines: e.target.checked
+                    }))
+                  }
                 />
                 Remove Ruled Lines
               </label>
@@ -195,10 +219,12 @@ function AssetScanner() {
                 <input
                   type="checkbox"
                   checked={processingOptions.enhanceContrast}
-                  onChange={(e) => setProcessingOptions(prev => ({
-                    ...prev,
-                    enhanceContrast: e.target.checked
-                  }))}
+                  onChange={(e) =>
+                    setProcessingOptions((prev) => ({
+                      ...prev,
+                      enhanceContrast: e.target.checked
+                    }))
+                  }
                 />
                 Enhance Contrast
               </label>
@@ -207,7 +233,7 @@ function AssetScanner() {
 
           <div className="controls">
             <button onClick={handleProcess}>Process Image</button>
-            <button 
+            <button
               onClick={() => {
                 setStep('select');
                 setSelectedFile(null);
@@ -230,19 +256,19 @@ function AssetScanner() {
             </div>
             <div className="preview-container">
               <h3>Processed:</h3>
-              <canvas ref={canvasRef} />
+              {processedUrl && <img src={processedUrl} alt="Processed" />}
             </div>
           </div>
 
           <div className="controls">
             <button onClick={handleUpload}>Upload Processed Image</button>
-            <button 
+            <button
               onClick={() => setStep('process')}
               className="secondary"
             >
               Adjust Processing
             </button>
-            <button 
+            <button
               onClick={() => {
                 setStep('select');
                 setSelectedFile(null);
@@ -259,7 +285,7 @@ function AssetScanner() {
 
       <div className="gallery">
         <h2>Uploaded Assets</h2>
-        {assets.map(asset => (
+        {assets.map((asset) => (
           <div key={asset.id} className="gallery-item">
             <img src={asset.url} alt={asset.originalFilename} />
             <div className="gallery-info">
