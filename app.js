@@ -11,10 +11,16 @@ function AssetScanner() {
     enhanceContrast: false
   });
   const [assets, setAssets] = useState([]);
+  const [opencvReady, setOpencvReady] = useState(false);
   const canvasRef = useRef(null);
   const room = new WebsimSocket();
 
   useEffect(() => {
+    // Set up OpenCV.js
+    window.onOpenCvReady = () => {
+      setOpencvReady(true);
+    };
+
     return room.collection('asset').subscribe(assets => {
       setAssets(assets);
     });
@@ -35,6 +41,11 @@ function AssetScanner() {
   };
 
   const processImage = async () => {
+    if (!opencvReady) {
+      alert('OpenCV.js is still loading. Please wait a moment and try again.');
+      return;
+    }
+
     return new Promise((resolve) => {
       const img = new Image();
       img.onload = () => {
@@ -106,6 +117,12 @@ function AssetScanner() {
   return (
     <div className="scanner-container">
       <h1>Hand-Drawn Asset Scanner</h1>
+      
+      {!opencvReady && (
+        <div className="loading-message">
+          Loading OpenCV.js... Please wait.
+        </div>
+      )}
       
       <div className="step-indicator">
         <div className={`step ${step === 'select' ? 'active' : ''}`}>1. Select</div>

@@ -170,3 +170,12 @@ button.secondary:hover {
 .review-step {
   margin: 20px 0;
 }
+
+.loading-message {
+  background: #fff3cd;
+  color: #856404;
+  padding: 10px;
+  border-radius: 4px;
+  margin: 10px 0;
+  text-align: center;
+}
