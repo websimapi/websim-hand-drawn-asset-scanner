@@ -27,7 +27,7 @@ function AssetScanner() {
       setOpencvReady(true);
     }
 
-    const unsubscribe = room.collection('asset').subscribe(assets => {
+    const unsubscribe = room.collection('asset').subscribe((assets) => {
       setAssets(assets);
     });
 
@@ -71,108 +71,55 @@ function AssetScanner() {
         let dst = new cv.Mat();
 
         if (processingOptions.removeGridLines) {
-          // Updated Grid Line Removal Algorithm:
-          // 1. Blur the image to reduce noise
-          let blurred = new cv.Mat();
-          cv.GaussianBlur(src, blurred, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-
-          // 2. Convert to grayscale and perform edge detection
+          // New grid removal algorithm:
+          // Detect square outlines (grid cells) and paint those pixel lines white.
+          dst = src.clone();
           let gray = new cv.Mat();
-          cv.cvtColor(blurred, gray, cv.COLOR_RGBA2GRAY);
+          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+          let blurred = new cv.Mat();
+          cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
           let edges = new cv.Mat();
-          cv.Canny(gray, edges, 50, 150, 3, false);
+          cv.Canny(blurred, edges, 50, 150, 3, false);
+          // Dilate edges to connect potential gaps in line segments
+          let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+          cv.dilate(edges, edges, kernel);
+          kernel.delete();
 
-          // 3. Find contours and detect square shapes (grid squares)
           let contours = new cv.MatVector();
           let hierarchy = new cv.Mat();
-          cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+          cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
 
-          let candidateColors = [];
           for (let i = 0; i < contours.size(); i++) {
             let cnt = contours.get(i);
             let approx = new cv.Mat();
-            let peri = cv.arcLength(cnt, true);
-            cv.approxPolyDP(cnt, approx, 0.02 * peri, true);
-
-            // Check if the approximated contour is a convex quadrilateral
+            cv.approxPolyDP(cnt, approx, 0.02 * cv.arcLength(cnt, true), true);
             if (approx.rows === 4 && cv.isContourConvex(approx)) {
               let rect = cv.boundingRect(approx);
-              // Ensure the shape is roughly square via aspect ratio check
               let aspectRatio = rect.width / rect.height;
-              if (aspectRatio > 0.8 && aspectRatio < 1.2) {
-                let area = cv.contourArea(approx);
-                // Consider only sufficiently large squares
-                if (area > (src.rows * src.cols * 0.005)) {
-                  // Sample the grid line color by taking midpoints of each edge
-                  let samplePoints = [
-                    { x: rect.x + rect.width / 2, y: rect.y }, // top edge
-                    { x: rect.x + rect.width, y: rect.y + rect.height / 2 }, // right edge
-                    { x: rect.x + rect.width / 2, y: rect.y + rect.height }, // bottom edge
-                    { x: rect.x, y: rect.y + rect.height / 2 } // left edge
-                  ];
-                  let colorSamples = [];
-                  samplePoints.forEach(pt => {
-                    let x = Math.floor(Math.min(src.cols - 1, Math.max(0, pt.x)));
-                    let y = Math.floor(Math.min(src.rows - 1, Math.max(0, pt.y)));
-                    let pixel = src.ucharPtr(y, x);
-                    colorSamples.push([pixel[0], pixel[1], pixel[2]]);
-                  });
-                  let sumR = 0, sumG = 0, sumB = 0;
-                  colorSamples.forEach(c => {
-                    sumR += c[0];
-                    sumG += c[1];
-                    sumB += c[2];
-                  });
-                  let avgR = sumR / colorSamples.length;
-                  let avgG = sumG / colorSamples.length;
-                  let avgB = sumB / colorSamples.length;
-                  candidateColors.push([avgR, avgG, avgB]);
-                }
+              let area = cv.contourArea(approx, false);
+              let imageArea = src.cols * src.rows;
+              // Filter for square-like contours of a reasonable size
+              if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > 50 && area < imageArea * 0.2) {
+                // Overwrite the detected grid line (square outline) pixels with white
+                cv.drawContours(dst, contours, i, new cv.Scalar(255, 255, 255, 255), 3);
               }
             }
             approx.delete();
             cnt.delete();
           }
-          blurred.delete();
           gray.delete();
+          blurred.delete();
           edges.delete();
           contours.delete();
           hierarchy.delete();
-
-          if (candidateColors.length > 0) {
-            // Average the candidate colors to determine the dominant grid line color
-            let sumR = 0, sumG = 0, sumB = 0;
-            candidateColors.forEach(color => {
-              sumR += color[0];
-              sumG += color[1];
-              sumB += color[2];
-            });
-            let targetR = sumR / candidateColors.length;
-            let targetG = sumG / candidateColors.length;
-            let targetB = sumB / candidateColors.length;
-
-            // Create a mask for pixels matching the grid line color (with tolerance)
-            let mask = new cv.Mat();
-            let lowerScalar = new cv.Scalar(targetR - 20, targetG - 20, targetB - 20, 0);
-            let upperScalar = new cv.Scalar(targetR + 20, targetG + 20, targetB + 20, 255);
-            cv.inRange(src, lowerScalar, upperScalar, mask);
-
-            // Remove grid lines by inpainting the masked regions
-            cv.inpaint(src, mask, dst, 3, cv.INPAINT_TELEA);
-            mask.delete();
-          } else {
-            // If no grid squares are detected, just copy the source image
-            src.copyTo(dst);
-          }
         } else if (processingOptions.removeRuledLines) {
-          // Existing ruled lines removal method (grayscale conversion and adaptive threshold)
+          // Existing ruled lines removal method – grayscale and adaptive threshold
           cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
           cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
           let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
           cv.morphologyEx(dst, dst, cv.MORPH_OPEN, kernel);
           kernel.delete();
         } else {
-          // No line removal selected – just clone the original image
           src.copyTo(dst);
         }
 
@@ -190,11 +137,10 @@ function AssetScanner() {
         }
 
         cv.imshow(canvas, dst);
-        src.delete();
-        dst.delete();
-
         const dataUrl = canvas.toDataURL();
         setProcessedUrl(dataUrl);
+        src.delete();
+        dst.delete();
         resolve();
       };
       img.onerror = (err) => {
