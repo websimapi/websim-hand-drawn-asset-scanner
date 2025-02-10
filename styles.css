@@ -19,10 +19,15 @@ body {
   text-align: center;
 }
 
+.preview-container img,
 .preview-container canvas {
   max-width: 100%;
   border: 2px solid #ddd;
   border-radius: 4px;
+}
+
+.preview-container h3 {
+  margin: 10px 0;
 }
 
 .controls {
@@ -51,11 +56,25 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.secondary {
+  background: #9e9e9e;
+}
+
+button.secondary:hover {
+  background: #757575;
+}
+
 .gallery {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 20px;
   margin-top: 20px;
+}
+
+.gallery h2 {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid #ddd;
 }
 
 .gallery-item {
@@ -108,4 +127,46 @@ button:disabled {
 
 .processing-option {
   margin: 10px 0;
+}
+
+.step-indicator {
+  display: flex;
+  justify-content: space-between;
+  margin: 20px 0;
+  padding: 0 20px;
+}
+
+.step {
+  padding: 10px 20px;
+  background: #e0e0e0;
+  border-radius: 20px;
+  position: relative;
+}
+
+.step.active {
+  background: #2196f3;
+  color: white;
+}
+
+.step:not(:last-child):after {
+  content: '';
+  position: absolute;
+  right: -50%;
+  top: 50%;
+  width: 100%;
+  height: 2px;
+  background: #e0e0e0;
+  z-index: -1;
+}
+
+.image-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.process-step,
+.review-step {
+  margin: 20px 0;
 }

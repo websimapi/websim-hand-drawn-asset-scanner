@@ -3,7 +3,8 @@ const { useState, useEffect, useRef } = React;
 function AssetScanner() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
-  const [showConfirmation, setShowConfirmation] = useState(false);
+  const [processedUrl, setProcessedUrl] = useState(null);
+  const [step, setStep] = useState('select'); // select, process, review, upload
   const [processingOptions, setProcessingOptions] = useState({
     removeGridLines: false,
     removeRuledLines: false,
@@ -14,7 +15,6 @@ function AssetScanner() {
   const room = new WebsimSocket();
 
   useEffect(() => {
-    // Subscribe to asset collection updates
     return room.collection('asset').subscribe(assets => {
       setAssets(assets);
     });
@@ -25,8 +25,12 @@ function AssetScanner() {
     if (file) {
       setSelectedFile(file);
       const reader = new FileReader();
-      reader.onload = (e) => setPreviewUrl(e.target.result);
+      reader.onload = (e) => {
+        setPreviewUrl(e.target.result);
+        setProcessedUrl(null); // Reset processed image when new file selected
+      }
       reader.readAsDataURL(file);
+      setStep('process');
     }
   };
 
@@ -45,15 +49,11 @@ function AssetScanner() {
         let dst = new cv.Mat();
 
         if (processingOptions.removeGridLines || processingOptions.removeRuledLines) {
-          // Convert to grayscale
           cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
-          
-          // Apply adaptive threshold
           cv.adaptiveThreshold(dst, dst, 255,
             cv.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv.THRESH_BINARY, 11, 2);
 
-          // Morphological operations to remove lines
           let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(2, 2));
           cv.morphologyEx(dst, dst, cv.MORPH_OPEN, kernel);
           kernel.delete();
@@ -68,16 +68,23 @@ function AssetScanner() {
         src.delete();
         dst.delete();
 
+        setProcessedUrl(canvas.toDataURL());
         canvas.toBlob(resolve);
       };
       img.src = previewUrl;
     });
   };
 
+  const handleProcess = async () => {
+    await processImage();
+    setStep('review');
+  };
+
   const handleUpload = async () => {
     try {
-      const processedBlob = await processImage();
-      const url = await websim.upload(processedBlob);
+      const response = await fetch(processedUrl);
+      const blob = await response.blob();
+      const url = await websim.upload(blob);
       
       await room.collection('asset').create({
         url,
@@ -85,9 +92,11 @@ function AssetScanner() {
         originalFilename: selectedFile.name
       });
 
+      // Reset state
       setSelectedFile(null);
       setPreviewUrl(null);
-      setShowConfirmation(false);
+      setProcessedUrl(null);
+      setStep('select');
     } catch (error) {
       console.error('Upload failed:', error);
       alert('Failed to upload asset. Please try again.');
@@ -98,91 +107,129 @@ function AssetScanner() {
     <div className="scanner-container">
       <h1>Hand-Drawn Asset Scanner</h1>
       
-      <div className="controls">
-        <input
-          type="file"
-          accept="image/*"
-          onChange={handleFileSelect}
-          capture="environment"
-        />
-        {selectedFile && (
-          <button 
-            onClick={() => setShowConfirmation(true)}
-          >
-            Process & Upload
-          </button>
-        )}
+      <div className="step-indicator">
+        <div className={`step ${step === 'select' ? 'active' : ''}`}>1. Select</div>
+        <div className={`step ${step === 'process' ? 'active' : ''}`}>2. Process</div>
+        <div className={`step ${step === 'review' ? 'active' : ''}`}>3. Review</div>
       </div>
 
-      {previewUrl && (
-        <div className="preview-container">
-          <canvas ref={canvasRef} />
+      {step === 'select' && (
+        <div className="controls">
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleFileSelect}
+            capture="environment"
+          />
         </div>
       )}
 
-      {showConfirmation && (
-        <div className="modal">
-          <div className="modal-content">
-            <h2>Configure Processing</h2>
-            
-            <div className="processing-options">
-              <div className="processing-option">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={processingOptions.removeGridLines}
-                    onChange={(e) => setProcessingOptions(prev => ({
-                      ...prev,
-                      removeGridLines: e.target.checked
-                    }))}
-                  />
-                  Remove Grid Lines
-                </label>
-              </div>
+      {step === 'process' && (
+        <div className="process-step">
+          <div className="preview-container">
+            <h3>Original Image:</h3>
+            <img src={previewUrl} alt="Preview" />
+          </div>
 
-              <div className="processing-option">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={processingOptions.removeRuledLines}
-                    onChange={(e) => setProcessingOptions(prev => ({
-                      ...prev,
-                      removeRuledLines: e.target.checked
-                    }))}
-                  />
-                  Remove Ruled Lines
-                </label>
-              </div>
-
-              <div className="processing-option">
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={processingOptions.enhanceContrast}
-                    onChange={(e) => setProcessingOptions(prev => ({
-                      ...prev,
-                      enhanceContrast: e.target.checked
-                    }))}
-                  />
-                  Enhance Contrast
-                </label>
-              </div>
+          <div className="processing-options">
+            <h3>Processing Options:</h3>
+            <div className="processing-option">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={processingOptions.removeGridLines}
+                  onChange={(e) => setProcessingOptions(prev => ({
+                    ...prev,
+                    removeGridLines: e.target.checked
+                  }))}
+                />
+                Remove Grid Lines
+              </label>
             </div>
 
-            <div className="controls">
-              <button onClick={handleUpload}>Confirm Upload</button>
-              <button 
-                onClick={() => setShowConfirmation(false)}
-                style={{ background: '#f44336' }}
-              >
-                Cancel
-              </button>
+            <div className="processing-option">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={processingOptions.removeRuledLines}
+                  onChange={(e) => setProcessingOptions(prev => ({
+                    ...prev,
+                    removeRuledLines: e.target.checked
+                  }))}
+                />
+                Remove Ruled Lines
+              </label>
             </div>
+
+            <div className="processing-option">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={processingOptions.enhanceContrast}
+                  onChange={(e) => setProcessingOptions(prev => ({
+                    ...prev,
+                    enhanceContrast: e.target.checked
+                  }))}
+                />
+                Enhance Contrast
+              </label>
+            </div>
+          </div>
+
+          <div className="controls">
+            <button onClick={handleProcess}>Process Image</button>
+            <button 
+              onClick={() => {
+                setStep('select');
+                setSelectedFile(null);
+                setPreviewUrl(null);
+              }}
+              className="secondary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step === 'review' && (
+        <div className="review-step">
+          <div className="image-comparison">
+            <div className="preview-container">
+              <h3>Original:</h3>
+              <img src={previewUrl} alt="Original" />
+            </div>
+            <div className="preview-container">
+              <h3>Processed:</h3>
+              <canvas ref={canvasRef} />
+            </div>
+          </div>
+
+          <div className="controls">
+            <button onClick={handleUpload}>Upload Processed Image</button>
+            <button 
+              onClick={() => setStep('process')}
+              className="secondary"
+            >
+              Adjust Processing
+            </button>
+            <button 
+              onClick={() => {
+                setStep('select');
+                setSelectedFile(null);
+                setPreviewUrl(null);
+                setProcessedUrl(null);
+              }}
+              className="secondary"
+            >
+              Start Over
+            </button>
           </div>
         </div>
       )}
 
       <div className="gallery">
+        <h2>Uploaded Assets</h2>
         {assets.map(asset => (
           <div key={asset.id} className="gallery-item">
             <img src={asset.url} alt={asset.originalFilename} />
