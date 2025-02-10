@@ -8,10 +8,10 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script>
-    // Define a single global callback that will be called when OpenCV is ready
+    // Updated onOpenCvReady function to prevent recursive calls
     function onOpenCvReady() {
+      if (window.opencvReady) return;
       window.opencvReady = true;
-      // Dispatch a custom event that our React component can listen for
       window.dispatchEvent(new Event('opencv-ready'));
     }
   </script>
