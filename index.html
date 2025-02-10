@@ -7,14 +7,15 @@
   <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script async src="https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.min.js" onload="onOpenCvReady();"></script>
   <script>
+    // Define a single global callback that will be called when OpenCV is ready
     function onOpenCvReady() {
-      if (window.onOpenCvReady) {
-        window.onOpenCvReady();
-      }
+      window.opencvReady = true;
+      // Dispatch a custom event that our React component can listen for
+      window.dispatchEvent(new Event('opencv-ready'));
     }
   </script>
+  <script async src="https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.min.js" onload="onOpenCvReady();"></script>
 </head>
 <body>
   <div id="root"></div>

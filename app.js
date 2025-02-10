@@ -11,19 +11,31 @@ function AssetScanner() {
     enhanceContrast: false
   });
   const [assets, setAssets] = useState([]);
-  const [opencvReady, setOpencvReady] = useState(false);
+  const [opencvReady, setOpencvReady] = useState(window.opencvReady || false);
   const canvasRef = useRef(null);
   const room = new WebsimSocket();
 
   useEffect(() => {
-    // Set up OpenCV.js
-    window.onOpenCvReady = () => {
+    // Listen for the custom opencv-ready event
+    const handleOpencvReady = () => {
       setOpencvReady(true);
     };
 
-    return room.collection('asset').subscribe(assets => {
+    window.addEventListener('opencv-ready', handleOpencvReady);
+
+    // If OpenCV was already loaded before component mounted
+    if (window.opencvReady) {
+      setOpencvReady(true);
+    }
+
+    const unsubscribe = room.collection('asset').subscribe(assets => {
       setAssets(assets);
     });
+
+    return () => {
+      window.removeEventListener('opencv-ready', handleOpencvReady);
+      unsubscribe();
+    };
   }, []);
 
   const handleFileSelect = (event) => {
