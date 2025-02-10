@@ -8,7 +8,8 @@ function AssetScanner() {
   const [processingOptions, setProcessingOptions] = useState({
     removeGridLines: false,
     removeRuledLines: false,
-    enhanceContrast: false
+    enhanceContrast: false,
+    gridSensitivity: 50
   });
   const [assets, setAssets] = useState([]);
   const [opencvReady, setOpencvReady] = useState(window.opencvReady || false);
@@ -72,9 +73,10 @@ function AssetScanner() {
         let dst = src.clone();
 
         if (processingOptions.removeGridLines) {
-          // Iteratively detect square grid lines and remove them by turning only the detected grid pixels white.
-          // Run multiple passes to ensure all squares are processed.
-          for (let pass = 0; pass < 3; pass++) {
+          let sensitivity = processingOptions.gridSensitivity || 50;
+          // Run multiple passes to detect and remove grid squares
+          const numPasses = 5; // Increased passes to ensure all grid squares are processed
+          for (let pass = 0; pass < numPasses; pass++) {
             let workingMat = new cv.Mat();
             cv.cvtColor(dst, workingMat, cv.COLOR_RGBA2GRAY);
             let blurred = new cv.Mat();
@@ -82,7 +84,7 @@ function AssetScanner() {
             workingMat.delete();
 
             let edges = new cv.Mat();
-            cv.Canny(blurred, edges, 50, 150, 3, false);
+            cv.Canny(blurred, edges, sensitivity, sensitivity * 3, 3, false);
             blurred.delete();
 
             let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
@@ -92,7 +94,8 @@ function AssetScanner() {
             let contours = new cv.MatVector();
             let hierarchy = new cv.Mat();
             cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
-            // Process each detected contour
+            
+            // Process each detected contour as potential grid square
             for (let i = 0; i < contours.size(); i++) {
               let cnt = contours.get(i);
               let approx = new cv.Mat();
@@ -104,18 +107,19 @@ function AssetScanner() {
                 let imageArea = src.cols * src.rows;
                 // Filter to likely grid squares
                 if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > 50 && area < imageArea * 0.2) {
-                  // Create a mask for the contour outline with thickness 3
+                  // Create a mask for the contour outline with thickness based on sensitivity
                   let mask = new cv.Mat.zeros(dst.rows, dst.cols, cv.CV_8UC1);
                   let contourVec = new cv.MatVector();
                   contourVec.push_back(approx);
-                  cv.drawContours(mask, contourVec, 0, new cv.Scalar(255), 3);
+                  // Thickness set to a minimum of 3 or derived from sensitivity
+                  cv.drawContours(mask, contourVec, 0, new cv.Scalar(255), Math.max(3, Math.floor(sensitivity / 20)));
                   contourVec.delete();
                   // Only iterate inside the bounding rect for efficiency
                   for (let y = rect.y; y < rect.y + rect.height && y < dst.rows; y++) {
                     for (let x = rect.x; x < rect.x + rect.width && x < dst.cols; x++) {
                       if (mask.ucharPtr(y, x)[0] > 0) {
                         let pixel = dst.ucharPtr(y, x);
-                        // Replace only non-white pixels (i.e. the grid line color) with white.
+                        // Replace grid pixel with white if it's not already white
                         if (!(pixel[0] === 255 && pixel[1] === 255 && pixel[2] === 255)) {
                           pixel[0] = 255;
                           pixel[1] = 255;
@@ -260,7 +264,25 @@ function AssetScanner() {
                 Remove Grid Lines
               </label>
             </div>
-
+            {processingOptions.removeGridLines && (
+              <div className="processing-option">
+                <label>
+                  Grid Sensitivity: {processingOptions.gridSensitivity}
+                  <input
+                    type="range"
+                    min="10"
+                    max="100"
+                    value={processingOptions.gridSensitivity}
+                    onChange={(e) =>
+                      setProcessingOptions((prev) => ({
+                        ...prev,
+                        gridSensitivity: parseInt(e.target.value)
+                      }))
+                    }
+                  />
+                </label>
+              </div>
+            )}
             <div className="processing-option">
               <label>
                 <input
@@ -276,7 +298,6 @@ function AssetScanner() {
                 Remove Ruled Lines
               </label>
             </div>
-
             <div className="processing-option">
               <label>
                 <input
