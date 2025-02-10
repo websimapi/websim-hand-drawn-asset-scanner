@@ -67,51 +67,76 @@ function AssetScanner() {
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
 
+        // Read the image into an OpenCV Mat
         let src = cv.imread(canvas);
-        let dst = new cv.Mat();
+        let dst = src.clone();
 
         if (processingOptions.removeGridLines) {
-          // New grid removal algorithm:
-          // Detect square outlines (grid cells) and paint those pixel lines white.
-          dst = src.clone();
-          let gray = new cv.Mat();
-          cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
-          let blurred = new cv.Mat();
-          cv.GaussianBlur(gray, blurred, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
-          let edges = new cv.Mat();
-          cv.Canny(blurred, edges, 50, 150, 3, false);
-          // Dilate edges to connect potential gaps in line segments
-          let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
-          cv.dilate(edges, edges, kernel);
-          kernel.delete();
+          // Iteratively detect square grid lines and remove them by turning only the detected grid pixels white.
+          // Run multiple passes to ensure all squares are processed.
+          for (let pass = 0; pass < 3; pass++) {
+            let workingMat = new cv.Mat();
+            cv.cvtColor(dst, workingMat, cv.COLOR_RGBA2GRAY);
+            let blurred = new cv.Mat();
+            cv.GaussianBlur(workingMat, blurred, new cv.Size(3, 3), 0, 0, cv.BORDER_DEFAULT);
+            workingMat.delete();
 
-          let contours = new cv.MatVector();
-          let hierarchy = new cv.Mat();
-          cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+            let edges = new cv.Mat();
+            cv.Canny(blurred, edges, 50, 150, 3, false);
+            blurred.delete();
 
-          for (let i = 0; i < contours.size(); i++) {
-            let cnt = contours.get(i);
-            let approx = new cv.Mat();
-            cv.approxPolyDP(cnt, approx, 0.02 * cv.arcLength(cnt, true), true);
-            if (approx.rows === 4 && cv.isContourConvex(approx)) {
-              let rect = cv.boundingRect(approx);
-              let aspectRatio = rect.width / rect.height;
-              let area = cv.contourArea(approx, false);
-              let imageArea = src.cols * src.rows;
-              // Filter for square-like contours of a reasonable size
-              if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > 50 && area < imageArea * 0.2) {
-                // Overwrite the detected grid line (square outline) pixels with white
-                cv.drawContours(dst, contours, i, new cv.Scalar(255, 255, 255, 255), 3);
+            let kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(3, 3));
+            cv.dilate(edges, edges, kernel);
+            kernel.delete();
+
+            let contours = new cv.MatVector();
+            let hierarchy = new cv.Mat();
+            cv.findContours(edges, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+            // Process each detected contour
+            for (let i = 0; i < contours.size(); i++) {
+              let cnt = contours.get(i);
+              let approx = new cv.Mat();
+              cv.approxPolyDP(cnt, approx, 0.02 * cv.arcLength(cnt, true), true);
+              if (approx.rows === 4 && cv.isContourConvex(approx)) {
+                let rect = cv.boundingRect(approx);
+                let aspectRatio = rect.width / rect.height;
+                let area = cv.contourArea(approx, false);
+                let imageArea = src.cols * src.rows;
+                // Filter to likely grid squares
+                if (aspectRatio > 0.8 && aspectRatio < 1.2 && area > 50 && area < imageArea * 0.2) {
+                  // Create a mask for the contour outline with thickness 3
+                  let mask = new cv.Mat.zeros(dst.rows, dst.cols, cv.CV_8UC1);
+                  let contourVec = new cv.MatVector();
+                  contourVec.push_back(approx);
+                  cv.drawContours(mask, contourVec, 0, new cv.Scalar(255), 3);
+                  contourVec.delete();
+                  // Only iterate inside the bounding rect for efficiency
+                  for (let y = rect.y; y < rect.y + rect.height && y < dst.rows; y++) {
+                    for (let x = rect.x; x < rect.x + rect.width && x < dst.cols; x++) {
+                      if (mask.ucharPtr(y, x)[0] > 0) {
+                        let pixel = dst.ucharPtr(y, x);
+                        // Replace only non-white pixels (i.e. the grid line color) with white.
+                        if (!(pixel[0] === 255 && pixel[1] === 255 && pixel[2] === 255)) {
+                          pixel[0] = 255;
+                          pixel[1] = 255;
+                          pixel[2] = 255;
+                          if (dst.channels() === 4) {
+                            pixel[3] = 255;
+                          }
+                        }
+                      }
+                    }
+                  }
+                  mask.delete();
+                }
               }
+              approx.delete();
+              cnt.delete();
             }
-            approx.delete();
-            cnt.delete();
+            hierarchy.delete();
+            contours.delete();
+            edges.delete();
           }
-          gray.delete();
-          blurred.delete();
-          edges.delete();
-          contours.delete();
-          hierarchy.delete();
         } else if (processingOptions.removeRuledLines) {
           // Existing ruled lines removal method – grayscale and adaptive threshold
           cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY);
@@ -144,6 +169,7 @@ function AssetScanner() {
         resolve();
       };
       img.onerror = (err) => {
+        console.error('Error loading image:', err);
         reject(err);
       };
       img.src = previewUrl;
